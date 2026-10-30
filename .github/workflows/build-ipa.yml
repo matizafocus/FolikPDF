@@ -25,6 +25,36 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
 
+      - name: Adaptar barra de herramientas a Xcode 26.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("Folik/ReaderView.swift")
+          source = path.read_text()
+          start = source.index("private struct ReaderTaskToolbar<")
+          end = source.index("private enum ReaderActionFocus:", start)
+          replacement = """private struct ReaderTaskToolbar<Actions: View, Secondary: View>: ViewModifier {
+              let actions: Actions
+              let secondary: Secondary
+
+              func body(content: Content) -> some View {
+                  content.toolbar {
+                      ToolbarItemGroup(placement: .bottomBar) { actions }
+                      ToolbarItemGroup(placement: .bottomBar) { secondary }
+                  }
+              }
+          }
+
+          """
+          if "ToolbarOverflowMenu" not in source[start:end] or "toolbarVerticalEdge" not in source[start:end]:
+              raise SystemExit("La implementacion de ReaderView ha cambiado; se cancela el parche")
+          path.write_text(source[:start] + replacement + source[end:])
+          print("Usando la barra inferior existente; sin modificar el repositorio fuente")
+          PY
+
       - name: Compilar para iPhone
         shell: bash
         run: |
