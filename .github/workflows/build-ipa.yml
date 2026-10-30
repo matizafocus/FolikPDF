@@ -1,0 +1,63 @@
+name: Compilar Folik IPA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar IPA sin firma
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Obtener codigo
+        uses: actions/checkout@v4
+
+      - name: Seleccionar Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Compilar para iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Folik.xcodeproj \
+            -scheme Folik \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/FolikBuild" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Empaquetar y verificar IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/FolikBuild/Build/Products/Release-iphoneos/Folik.app"
+          test -d "$APP"
+          test -f "$APP/Info.plist"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          ditto "$APP" "$RUNNER_TEMP/ipa/Payload/Folik.app"
+          (cd "$RUNNER_TEMP/ipa" && /usr/bin/zip -qry "$GITHUB_WORKSPACE/Folik.ipa" Payload)
+          unzip -t Folik.ipa
+          ls -lh Folik.ipa
+          shasum -a 256 Folik.ipa
+
+      - name: Publicar Folik.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Folik-IPA
+          path: Folik.ipa
+          if-no-files-found: error
+          retention-days: 30
