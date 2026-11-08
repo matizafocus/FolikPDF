@@ -1,0 +1,64 @@
+name: Build KAMUI 2.4.2 (selector fix)
+
+on:
+  push:
+    branches:
+      - kamui-selector-fix-build
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Check out pinned KAMUI source
+        uses: actions/checkout@v4
+        with:
+          repository: murk-sus/kamui-escape
+          ref: b6c8f9bd8578f7dd74c845fb017f365644191b9a
+          path: kamui
+          persist-credentials: false
+
+      - name: Fix Objective-C selector typo
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("kamui/src/GestaltVC.m")
+          old = "@selector(localizedCaseInsensitiveCompare)"
+          new = "@selector(localizedCaseInsensitiveCompare:)"
+          contents = source.read_text(encoding="utf-8")
+          assert contents.count(old) == 1, "Expected exactly one unpatched selector"
+          source.write_text(contents.replace(old, new), encoding="utf-8")
+          assert old not in source.read_text(encoding="utf-8")
+          print("Fixed selector; verified replacement")
+          PY
+
+      - name: Build unsigned iOS IPA using Xcode toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_PATH="$(xcrun --sdk iphoneos --show-sdk-path)"
+          echo "Using iOS SDK: $SDK_PATH"
+          # Upstream defaults to LLVM lld; use Xcode's native Apple linker instead.
+          python3 - <<'PY'
+          from pathlib import Path
+          script = Path("kamui/build.sh")
+          text = script.read_text(encoding="utf-8")
+          old = "    -fuse-ld=lld " + chr(92) + "\n"
+          assert text.count(old) == 1, "Expected exactly one lld flag"
+          script.write_text(text.replace(old, ""), encoding="utf-8")
+          PY
+          (cd kamui && SDK="$SDK_PATH" bash ./build.sh)
+          test -s kamui/build/KAMUI-2.4.2.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAMUI-2.4.2-selector-fixed-unsigned
+          path: kamui/build/KAMUI-2.4.2.ipa
+          if-no-files-found: error
+          retention-days: 7
