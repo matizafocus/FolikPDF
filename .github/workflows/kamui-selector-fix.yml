@@ -35,6 +35,13 @@ jobs:
           source.write_text(contents.replace(old, new), encoding="utf-8")
           assert old not in source.read_text(encoding="utf-8")
           print("Fixed selector; verified replacement")
+          # The Xcode 16 SDK already declares xpc_object_t via xpc/xpc.h.
+          core = Path("kamui/src/BQCore.m")
+          core_text = core.read_text(encoding="utf-8")
+          typedef = "typedef void *xpc_object_t;" + "\\n"
+          assert core_text.count(typedef) == 1, "Expected exactly one redundant typedef"
+          core.write_text(core_text.replace(typedef, ""), encoding="utf-8")
+          print("Removed redundant xpc_object_t typedef for Apple SDK")
           PY
 
       - name: Build unsigned iOS IPA using Xcode toolchain
