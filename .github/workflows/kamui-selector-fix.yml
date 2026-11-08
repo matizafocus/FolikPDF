@@ -38,7 +38,7 @@ jobs:
           # The Xcode 16 SDK already declares xpc_object_t via xpc/xpc.h.
           core = Path("kamui/src/BQCore.m")
           core_text = core.read_text(encoding="utf-8")
-          typedef = "typedef void *xpc_object_t;" + "\\n"
+          typedef = "typedef void *xpc_object_t;" + chr(10)
           assert core_text.count(typedef) == 1, "Expected exactly one redundant typedef"
           core.write_text(core_text.replace(typedef, ""), encoding="utf-8")
           print("Removed redundant xpc_object_t typedef for Apple SDK")
