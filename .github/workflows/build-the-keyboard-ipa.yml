@@ -1,0 +1,105 @@
+name: Build Android-style iOS keyboard IPA (SideStore)
+
+on:
+  push:
+    branches:
+      - build-the-keyboard-ipa
+    paths:
+      - '.github/workflows/build-the-keyboard-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      XCODEGEN_VERSION: 2.45.4
+      XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
+      DEVELOPMENT_TEAM: ''
+
+    steps:
+      - name: Check out pinned upstream keyboard source
+        uses: actions/checkout@v4
+        with:
+          repository: Srimi1/The-Keyboard-project
+          ref: 34090ee7be882a9e303d6f45123eb9a801d3158b
+          path: keyboard
+          persist-credentials: false
+
+      - name: Confirm Xcode 26.6 and iPhone SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install same pinned XcodeGen as upstream CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/xcodegen.zip"
+          mkdir -p "$RUNNER_TEMP/xcodegen"
+          curl --fail --location --silent --show-error "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip" --output "$archive"
+          echo "$XCODEGEN_SHA256  $archive" | shasum -a 256 -c -
+          ditto -x -k "$archive" "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Generate Xcode project
+        shell: bash
+        working-directory: keyboard
+        run: |
+          set -euo pipefail
+          xcodegen --version
+          xcodegen generate
+
+      - name: Build unsigned iPhone app and keyboard extension
+        shell: bash
+        working-directory: keyboard
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project KeyboardProject.xcodeproj \
+            -scheme KeyboardProject \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/KeyboardBuild" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Verify app, embedded keyboard, and package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/KeyboardBuild/Build/Products/Release-iphoneos/KeyboardProject.app"
+          ext="$app/PlugIns/KeyboardExtension.appex"
+          test -d "$app"
+          test -d "$ext"
+          test -f "$app/KeyboardProject"
+          test -f "$ext/KeyboardExtension"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$ext/Info.plist"
+          lipo -archs "$app/KeyboardProject" | grep -qw arm64
+          lipo -archs "$ext/KeyboardExtension" | grep -qw arm64
+          mkdir -p "$RUNNER_TEMP/package/Payload"
+          ditto "$app" "$RUNNER_TEMP/package/Payload/KeyboardProject.app"
+          (cd "$RUNNER_TEMP/package" && zip -qry "$GITHUB_WORKSPACE/KeyboardProject-SideStore.ipa" Payload)
+          unzip -t "$GITHUB_WORKSPACE/KeyboardProject-SideStore.ipa"
+          shasum -a 256 "$GITHUB_WORKSPACE/KeyboardProject-SideStore.ipa" > "$GITHUB_WORKSPACE/SHA256SUMS.txt"
+          ls -lh "$GITHUB_WORKSPACE/KeyboardProject-SideStore.ipa"
+
+      - name: Upload IPA for SideStore resigning
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyboardProject-SideStore-unsigned-IPA
+          path: |
+            KeyboardProject-SideStore.ipa
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
